@@ -1,7 +1,7 @@
 import type { Student } from '../../types';
 import { studentFromRow, studentToRow, type StudentRow } from '../mappers';
 import { supabaseClient } from '../supabaseClient';
-import { repoError, type Repo } from './base';
+import { repoError, type Repo, type UpsertOptions } from './base';
 
 const TABLE = 'students';
 
@@ -17,10 +17,12 @@ export const studentsRepo: Repo<Student> = {
     return ((data as StudentRow[] | null) ?? []).map(studentFromRow);
   },
 
-  async upsert(student: Student): Promise<void> {
+  async upsert(student: Student, opts?: UpsertOptions): Promise<void> {
+    const row = studentToRow(student);
+    if (opts?.updatedAt) row.updated_at = opts.updatedAt;
     const { error } = await supabaseClient
       .from(TABLE)
-      .upsert(studentToRow(student), { onConflict: 'id' });
+      .upsert(row, { onConflict: 'id' });
     if (error) throw repoError('students.upsert', error);
   },
 

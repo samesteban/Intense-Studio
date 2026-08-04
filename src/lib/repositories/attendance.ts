@@ -1,7 +1,7 @@
 import type { AttendanceRecord } from '../../types';
 import { attendanceFromRow, attendanceToRow, type AttendanceRow } from '../mappers';
 import { supabaseClient } from '../supabaseClient';
-import { repoError, type Repo } from './base';
+import { repoError, type Repo, type UpsertOptions } from './base';
 
 const TABLE = 'attendance_records';
 
@@ -18,10 +18,12 @@ export const attendanceRepo: Repo<AttendanceRecord> = {
     return ((data as AttendanceRow[] | null) ?? []).map(attendanceFromRow);
   },
 
-  async upsert(att: AttendanceRecord): Promise<void> {
+  async upsert(att: AttendanceRecord, opts?: UpsertOptions): Promise<void> {
+    const row = attendanceToRow(att);
+    if (opts?.updatedAt) row.updated_at = opts.updatedAt;
     const { error } = await supabaseClient
       .from(TABLE)
-      .upsert(attendanceToRow(att), { onConflict: 'id' });
+      .upsert(row, { onConflict: 'id' });
     if (error) throw repoError('attendance.upsert', error);
   },
 

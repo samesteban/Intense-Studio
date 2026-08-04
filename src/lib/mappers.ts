@@ -7,6 +7,10 @@
  *
  * Derived finance fields (status, lastPayment*) are intentionally NOT mapped:
  * they are computed client-side and never persisted (DAL-REQ-6).
+ *
+ * Row interfaces expose `updated_at` as optional so repositories can attach
+ * the LWW override (UpsertOptions.updatedAt) for sync replay (PR 4) without
+ * the app-domain types carrying timestamps.
  */
 import type {
   AttendanceRecord,
@@ -27,6 +31,7 @@ export interface StudentRow {
   registration_date: string;
   active: boolean;
   notes: string | null;
+  updated_at?: string;
 }
 
 export function studentFromRow(row: StudentRow): Student {
@@ -64,6 +69,7 @@ export interface ClassRow {
   max_capacity: number;
   color: string;
   description: string | null;
+  updated_at?: string;
 }
 
 export function classFromRow(row: ClassRow): ClassSchedule {
@@ -103,6 +109,7 @@ export interface PaymentRow {
   payment_date: string;
   notes: string | null;
   receipt_number: string;
+  updated_at?: string;
 }
 
 export function paymentFromRow(row: PaymentRow): Payment {
@@ -142,6 +149,7 @@ export interface AttendanceRow {
   date: string;
   time: string;
   recorded_offline: boolean;
+  updated_at?: string;
 }
 
 export function attendanceFromRow(row: AttendanceRow): AttendanceRecord {
@@ -176,6 +184,7 @@ export interface EnrollmentRow {
   class_id: string;
   student_id: string;
   day_of_week: number;
+  updated_at?: string;
 }
 
 export function enrollmentFromRow(row: EnrollmentRow): ClassEnrollment {

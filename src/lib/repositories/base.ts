@@ -8,9 +8,21 @@
  * composite (class_id, student_id, day_of_week), so `remove` takes the three
  * key parts instead of a single id (see enrollments.ts).
  */
+/**
+ * Optional upsert options.
+ *
+ * `updatedAt` is the LWW override used by the offline sync replay (PR 4):
+ * executors pass the queue item timestamp so the `set_updated_at` guard
+ * trigger preserves it instead of stamping now(). Ordinary writes omit it —
+ * the trigger stamps now() for them.
+ */
+export interface UpsertOptions {
+  updatedAt?: string;
+}
+
 export interface Repo<T> {
   list(): Promise<T[]>;
-  upsert(row: T): Promise<void>;
+  upsert(row: T, opts?: UpsertOptions): Promise<void>;
   remove(id: string): Promise<void>;
 }
 

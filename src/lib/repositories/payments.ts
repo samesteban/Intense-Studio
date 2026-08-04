@@ -1,7 +1,7 @@
 import type { Payment } from '../../types';
 import { paymentFromRow, paymentToRow, type PaymentRow } from '../mappers';
 import { supabaseClient } from '../supabaseClient';
-import { repoError, type Repo } from './base';
+import { repoError, type Repo, type UpsertOptions } from './base';
 
 const TABLE = 'payments';
 
@@ -17,10 +17,12 @@ export const paymentsRepo: Repo<Payment> = {
     return ((data as PaymentRow[] | null) ?? []).map(paymentFromRow);
   },
 
-  async upsert(payment: Payment): Promise<void> {
+  async upsert(payment: Payment, opts?: UpsertOptions): Promise<void> {
+    const row = paymentToRow(payment);
+    if (opts?.updatedAt) row.updated_at = opts.updatedAt;
     const { error } = await supabaseClient
       .from(TABLE)
-      .upsert(paymentToRow(payment), { onConflict: 'id' });
+      .upsert(row, { onConflict: 'id' });
     if (error) throw repoError('payments.upsert', error);
   },
 

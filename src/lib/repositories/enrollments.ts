@@ -1,7 +1,7 @@
 import type { ClassEnrollment } from '../../types';
 import { enrollmentFromRow, enrollmentToRow, type EnrollmentRow } from '../mappers';
 import { supabaseClient } from '../supabaseClient';
-import { repoError } from './base';
+import { repoError, type UpsertOptions } from './base';
 
 const TABLE = 'class_enrollments';
 
@@ -13,7 +13,7 @@ const TABLE = 'class_enrollments';
  */
 export interface EnrollmentsRepo {
   list(): Promise<ClassEnrollment[]>;
-  upsert(enr: ClassEnrollment): Promise<void>;
+  upsert(enr: ClassEnrollment, opts?: UpsertOptions): Promise<void>;
   remove(classId: string, studentId: string, dayOfWeek: number): Promise<void>;
 }
 
@@ -30,10 +30,12 @@ export const enrollmentsRepo: EnrollmentsRepo = {
     return ((data as EnrollmentRow[] | null) ?? []).map(enrollmentFromRow);
   },
 
-  async upsert(enr: ClassEnrollment): Promise<void> {
+  async upsert(enr: ClassEnrollment, opts?: UpsertOptions): Promise<void> {
+    const row = enrollmentToRow(enr);
+    if (opts?.updatedAt) row.updated_at = opts.updatedAt;
     const { error } = await supabaseClient
       .from(TABLE)
-      .upsert(enrollmentToRow(enr), {
+      .upsert(row, {
         onConflict: 'class_id,student_id,day_of_week',
       });
     if (error) throw repoError('enrollments.upsert', error);

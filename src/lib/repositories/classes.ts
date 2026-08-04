@@ -1,7 +1,7 @@
 import type { ClassSchedule } from '../../types';
 import { classFromRow, classToRow, type ClassRow } from '../mappers';
 import { supabaseClient } from '../supabaseClient';
-import { repoError, type Repo } from './base';
+import { repoError, type Repo, type UpsertOptions } from './base';
 
 const TABLE = 'class_schedules';
 
@@ -17,10 +17,12 @@ export const classesRepo: Repo<ClassSchedule> = {
     return ((data as ClassRow[] | null) ?? []).map(classFromRow);
   },
 
-  async upsert(cls: ClassSchedule): Promise<void> {
+  async upsert(cls: ClassSchedule, opts?: UpsertOptions): Promise<void> {
+    const row = classToRow(cls);
+    if (opts?.updatedAt) row.updated_at = opts.updatedAt;
     const { error } = await supabaseClient
       .from(TABLE)
-      .upsert(classToRow(cls), { onConflict: 'id' });
+      .upsert(row, { onConflict: 'id' });
     if (error) throw repoError('classes.upsert', error);
   },
 
