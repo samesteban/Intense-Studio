@@ -1,0 +1,6 @@
+{
+  "name": "Intense Studio",
+  "description": "Intense Studio - Sistema de gestión para instructores de gimnasio: control de asistencias, gestión de alumnos por ID único, agenda de clases, cobros y reportes con soporte offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

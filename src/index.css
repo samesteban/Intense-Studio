@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-accent: #7628A6;
+    --color-accent-hover: #621d8c;
+    --color-accent-light: #f3e8ff;
+  }
+
+  body {
+    font-family: 'Poppins', sans-serif;
+  }
+}
+
+@theme {
+  --font-sans: 'Poppins', system-ui, -apple-system, sans-serif;
+  --color-brand: #7628A6;
+  --color-brand-hover: #621D8C;
+  --color-brand-light: #8A31C2;
+}
+
+/* Custom scrollbars & Accent helpers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #7628A6;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
