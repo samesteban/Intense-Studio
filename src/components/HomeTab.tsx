@@ -379,11 +379,6 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                           <AlertTriangle className="w-3.5 h-3.5" /> Con Deuda
                         </span>
                       )}
-                      {recentStudent.status === 'inactivo' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-400 border border-slate-700 rounded-xl text-xs font-black">
-                          Inactivo
-                        </span>
-                      )}
                     </div>
                   </div>
 

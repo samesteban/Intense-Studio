@@ -283,7 +283,7 @@ export default function App() {
 
     if (!isOnline) {
       addToOfflineQueue({
-        action: 'RECORD_PAYMENT',
+        action: 'CREATE_PAYMENT',
         entity: 'Payment',
         payload: payment
       });

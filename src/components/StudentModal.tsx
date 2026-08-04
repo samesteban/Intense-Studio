@@ -58,6 +58,7 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       phone,
       email,
       registrationDate: studentToEdit ? studentToEdit.registrationDate : today,
+      active: studentToEdit ? studentToEdit.active : true,
       status: studentToEdit ? studentToEdit.status : 'al_dia',
       notes
     };
