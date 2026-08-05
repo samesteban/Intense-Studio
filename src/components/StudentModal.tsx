@@ -3,7 +3,7 @@
  * Handles student contact details and notes
  */
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Mail, FileText, Check } from 'lucide-react';
+import { User, Phone, Mail, FileText } from 'lucide-react';
 import { Student } from '../types';
 
 interface StudentModalProps {
@@ -23,6 +23,9 @@ export const StudentModal: React.FC<StudentModalProps> = ({
   const [phone, setPhone] = useState('+569');
   const [email, setEmail] = useState('');
   const [notes, setNotes] = useState('');
+  // Manual active flag (STATUS-REQ-1 / DAL-REQ-5). Falls back to true when a
+  // legacy record lacks the field (S1), never falsy-excluding on absence.
+  const [active, setActive] = useState(true);
 
   useEffect(() => {
     if (studentToEdit) {
@@ -30,11 +33,13 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       setPhone(studentToEdit.phone || '+569');
       setEmail(studentToEdit.email || '');
       setNotes(studentToEdit.notes || '');
+      setActive(studentToEdit.active !== false);
     } else {
       setName('');
       setPhone('+569');
       setEmail('');
       setNotes('');
+      setActive(true);
     }
   }, [studentToEdit, isOpen]);
 
@@ -58,7 +63,7 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       phone,
       email,
       registrationDate: studentToEdit ? studentToEdit.registrationDate : today,
-      status: studentToEdit ? studentToEdit.status : 'al_dia',
+      active,
       notes
     };
 
@@ -148,6 +153,37 @@ export const StudentModal: React.FC<StudentModalProps> = ({
               placeholder="Ej: Lesión en rodilla, o alumno avanzado..."
               className="w-full bg-slate-950 border border-slate-800 focus:border-[#7628A6] text-white font-medium p-3 rounded-xl outline-none resize-none"
             />
+          </div>
+
+          {/* Active flag toggle (STATUS-REQ-1 / DAL-REQ-5) */}
+          <div className="flex items-center justify-between gap-4 bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+            <div>
+              <span className="block text-xs font-black text-slate-300 uppercase mb-0.5">
+                Estado del Alumno
+              </span>
+              <span className="text-[11px] text-slate-500">
+                {active
+                  ? 'Activo — participa en clases y finanzas'
+                  : 'Inactivo — se muestra con el marcador de inactivo'}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={active}
+              aria-label="Alternar estado activo/inactivo"
+              onClick={() => setActive((a) => !a)}
+              className={`relative w-14 h-8 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c77dff] ${
+                active ? 'bg-emerald-500' : 'bg-slate-700'
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${
+                  active ? 'translate-x-7' : 'translate-x-1'
+                }`}
+              />
+            </button>
           </div>
 
           {/* Action Buttons */}

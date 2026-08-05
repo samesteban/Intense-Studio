@@ -9,7 +9,6 @@ import {
   Payment,
   Student
 } from '../types';
-import { calculateStudentFinances } from './pricing';
 
 const STORAGE_KEYS = {
   STUDENTS: 'gymcontrol_students_v3',
@@ -28,9 +27,7 @@ const INITIAL_STUDENTS: Student[] = [
     phone: '+56987654321',
     email: 'camila.m@gmail.com',
     registrationDate: '2026-06-15',
-    status: 'al_dia',
-    lastPaymentAmount: 10000,
-    lastPaymentDate: '2026-08-01',
+    active: true,
     notes: 'Lesión leve en rodilla izquierda. Evitar sentadillas pesadas.'
   },
   {
@@ -39,9 +36,7 @@ const INITIAL_STUDENTS: Student[] = [
     phone: '+56976543210',
     email: 'rodrigo.f@hotm.com',
     registrationDate: '2026-05-10',
-    status: 'al_dia',
-    lastPaymentAmount: 15000,
-    lastPaymentDate: '2026-07-20',
+    active: true,
     notes: 'Entrena CrossFit 19:00 hrs.'
   },
   {
@@ -50,9 +45,7 @@ const INITIAL_STUDENTS: Student[] = [
     phone: '+56965432109',
     email: 'valesilva@gmail.com',
     registrationDate: '2026-07-01',
-    status: 'con_deuda',
-    lastPaymentAmount: 5000,
-    lastPaymentDate: '2026-07-06',
+    active: true,
     notes: 'Recordar pago de saldo vía WhatsApp.'
   },
   {
@@ -60,9 +53,7 @@ const INITIAL_STUDENTS: Student[] = [
     name: 'Gonzalo Rojas Paredes',
     phone: '+56954321098',
     registrationDate: '2026-04-12',
-    status: 'con_deuda',
-    lastPaymentAmount: 0,
-    lastPaymentDate: '',
+    active: true,
     notes: 'Registrado recientemente.'
   },
   {
@@ -71,9 +62,7 @@ const INITIAL_STUDENTS: Student[] = [
     phone: '+56943210987',
     email: 'javi.torres@outlook.cl',
     registrationDate: '2026-08-02',
-    status: 'al_dia',
-    lastPaymentAmount: 2500,
-    lastPaymentDate: '2026-08-03',
+    active: true,
     notes: 'Pagado en efectivo clase individual.'
   },
   {
@@ -81,9 +70,7 @@ const INITIAL_STUDENTS: Student[] = [
     name: 'Matías Araneda Tapia',
     phone: '+56932109876',
     registrationDate: '2026-07-15',
-    status: 'al_dia',
-    lastPaymentAmount: 10000,
-    lastPaymentDate: '2026-07-15',
+    active: true,
     notes: 'Al día.'
   }
 ];
@@ -308,14 +295,4 @@ export function addToOfflineQueue(item: Omit<OfflineSyncItem, 'id' | 'timestamp'
 
 export function clearOfflineQueue() {
   localStorage.setItem(STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify([]));
-}
-
-export function computeMemberStatus(student: Student, allAttendances?: AttendanceRecord[], allPayments?: Payment[]): Student {
-  const atts = allAttendances || getAttendance();
-  const pays = allPayments || getPayments();
-  const summary = calculateStudentFinances(student.id, atts, pays);
-  return {
-    ...student,
-    status: summary.status
-  };
 }
