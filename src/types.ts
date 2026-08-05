@@ -14,17 +14,14 @@ export interface Student {
   registrationDate: string; // ISO string YYYY-MM-DD
   /**
    * Manual active flag (STATUS-REQ-1, DAL-REQ-5). Persisted boolean, default
-   * true; the sole source of active/inactive state. Legacy values `status`,
-   * `lastPaymentAmount` and `lastPaymentDate` are TRANSITIONAL on this type:
-   * they are dropped once the UI migrates to the derived-status pipeline
-   * (Slice 3, PR3b). Derived finance status is never persisted (DAL-REQ-6).
+   * true; the sole source of active/inactive state. Derived finance status
+   * (al_dia | con_deuda) is computed client-side via useMemo from the pricing
+   * engine and NEVER persisted (DAL-REQ-6, STATUS-REQ-4). The legacy
+   * `status`, `lastPaymentAmount`, `lastPaymentDate` and `emergencyContact`
+   * fields were dropped with the derived-status pipeline (Slice 3b2).
    */
   active: boolean;
-  status?: MemberStatus;
-  lastPaymentAmount?: number;
-  lastPaymentDate?: string;
   notes?: string;
-  emergencyContact?: string;
 }
 
 export interface Payment {
