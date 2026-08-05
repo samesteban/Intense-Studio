@@ -57,12 +57,13 @@ function fakeClient(failTransient: Set<string> = new Set()): SyncClient {
   const upsertOk = () => Promise.resolve();
   const enrollUpsert = () => Promise.resolve();
   const enrollRemove = () => Promise.resolve();
+  const enrollPrune = () => Promise.resolve();
   return {
     students: { upsert: studentUpsert, remove: removeOk },
     classes: { upsert: upsertOk, remove: removeOk },
     payments: { upsert: upsertOk, remove: removeOk },
     attendances: { upsert: upsertOk, remove: removeOk },
-    enrollments: { upsert: enrollUpsert, remove: enrollRemove },
+    enrollments: { upsert: enrollUpsert, remove: enrollRemove, pruneDays: enrollPrune },
   };
 }
 

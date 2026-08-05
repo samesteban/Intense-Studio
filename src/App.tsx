@@ -34,6 +34,7 @@ export default function App() {
     attendances,
     isOnline,
     queue,
+    quarantinedCount,
     syncNow,
     resetData,
     upsertStudent,
@@ -235,6 +236,7 @@ export default function App() {
       <Header
         isOnline={isOnline}
         pendingSyncCount={queue.length}
+        quarantinedCount={quarantinedCount}
         activeTab={activeTab}
         setActiveTab={handleTabChange}
         onResetData={handleResetData}

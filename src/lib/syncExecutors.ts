@@ -57,6 +57,8 @@ export interface SyncClient {
   enrollments: {
     upsert(row: ClassEnrollment, opts?: UpsertOptions): Promise<void>;
     remove(classId: string, studentId: string, dayOfWeek: number): Promise<void>;
+    /** Q3: drop junction rows for days removed from a class's days_of_week. */
+    pruneDays(classId: string, allowedDays: number[]): Promise<void>;
   };
 }
 
@@ -102,8 +104,12 @@ export const executors: Record<SyncAction, Executor> = {
     c.payments.remove((item.payload as { id: string }).id),
   CREATE_CLASS: (c, item) =>
     c.classes.upsert(payloadOf<ClassSchedule>(item), { updatedAt: item.timestamp }),
-  UPDATE_CLASS: (c, item) =>
-    c.classes.upsert(payloadOf<ClassSchedule>(item), { updatedAt: item.timestamp }),
+  UPDATE_CLASS: async (c, item) => {
+    const cls = payloadOf<ClassSchedule>(item);
+    await c.classes.upsert(cls, { updatedAt: item.timestamp });
+    // Q3: shrink days_of_week -> drop junction rows for the removed days.
+    await c.enrollments.pruneDays(cls.id, cls.daysOfWeek);
+  },
   DELETE_CLASS: (c, item) => c.classes.remove((item.payload as { id: string }).id),
   RECORD_ATTENDANCE: (c, item) =>
     c.attendances.upsert(payloadOf<AttendanceRecord>(item), {

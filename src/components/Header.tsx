@@ -2,12 +2,14 @@
  * Header Component with Offline Status, Intense Studio Branding and Navigation
  */
 import React from 'react';
-import { WifiOff, Lock, Home } from 'lucide-react';
+import { WifiOff, Lock, Home, AlertTriangle } from 'lucide-react';
 import { IntenseLogo } from './IntenseLogo';
 
 interface HeaderProps {
   isOnline: boolean;
   pendingSyncCount: number;
+  /** Fatal items awaiting operator attention (23505/409 receipt dups, Q2). */
+  quarantinedCount: number;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onResetData: () => void;
@@ -17,6 +19,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   isOnline,
   pendingSyncCount,
+  quarantinedCount,
   activeTab,
   setActiveTab,
   onResetData,
@@ -90,6 +93,29 @@ export const Header: React.FC<HeaderProps> = ({
               <WifiOff className="w-3.5 h-3.5 text-amber-400" />
               <span>Offline ({pendingSyncCount})</span>
             </div>
+          )}
+
+          {/* Manual sync button when online with pending items */}
+          {isOnline && pendingSyncCount > 0 && (
+            <button
+              onClick={onSync}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#7628A6]/40 bg-[#7628A6]/20 text-white text-xs font-semibold hover:bg-[#7628A6]/30 transition"
+              title="Reproducir cambios pendientes"
+            >
+              Sincronizar {pendingSyncCount}
+            </button>
+          )}
+
+          {/* Quarantine badge (fatal items need operator attention, Q2) */}
+          {quarantinedCount > 0 && (
+            <button
+              onClick={onSync}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/50 bg-red-950/80 text-red-300 text-xs font-semibold hover:bg-red-900/70 transition"
+              title={`${quarantinedCount} cambio(s) en cuarentena: no se pudieron aplicar (duplicado / conflicto). Revisar recibos duplicados.`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              <span>{quarantinedCount} en cuarentena</span>
+            </button>
           )}
         </div>
       </div>
