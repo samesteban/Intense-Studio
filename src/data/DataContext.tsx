@@ -1,19 +1,25 @@
 /**
- * DataProvider + useData (tasks.md 3.7, design decision 8, DAL-REQ-3/4/6).
+ * DataProvider + useData (tasks.md 3.7/4.5, design decision 8, DAL-REQ-3/4/6,
+ * SYNC-REQ-3/4/6).
  *
- * Owns every entity collection, connectivity state and the offline queue.
- * Boot is cache-first: it renders the cached snapshot from localStorage, then
- * refreshes from Supabase in the background and overwrites the cache with the
- * fetched rows (DAL-REQ-3). Writes are write-through (DAL-REQ-4): optimistic
- * state + cache update always, then persist via repository when online, or
- * enqueue an offline sync item when offline.
+ * Owns every entity collection, connectivity state, the offline queue and the
+ * quarantine badge. Boot is cache-first: it renders the cached snapshot from
+ * localStorage, then refreshes from Supabase in the background and reconciles
+ * the fetched rows with the pending queue (remote ∪ queuedById, design.md
+ * Sequence B / 4.4) before overwriting the cache (DAL-REQ-3).
  *
- * The write path NEVER persists derived finance status (DAL-REQ-6/STATUS-REQ-4):
- * the entities stored/queued here carry only persisted fields — status is
- * recomputed at render time by useMemberStatus / deriveStudentStatus.
+ * Writes are write-through (DAL-REQ-4): optimistic state + cache update always,
+ * then persist via repository when online, or enqueue an offline sync item when
+ * offline (SYNC-REQ-6). Every mutating action enqueues offline — nothing is
+ * silently lost (SYNC-REQ-6).
  *
- * Note: remap+reconcile against optimistic queued rows arrives with the PR4
- * store merging (4.4). Boot fetch here directly replaces the cache snapshot.
+ * Sync (4.3/4.5): `syncNow` replays the queue FIFO through the idempotent
+ * executors. Per-item ack only (SYNC-REQ-3); transient failures stop the run
+ * and keep i..N; fatal items (23505/409) quarantine into a badge without
+ * stopping the rest (design Sequence A, Q2). Runs automatically on the
+ * `online` event and after boot when the queue is non-empty.
+ *
+ * The write path NEVER persists derived finance status (DAL-REQ-6/STATUS-REQ-4).
  */
 import React, {
   createContext,
@@ -32,6 +38,7 @@ import type {
   Payment,
   Student,
   SyncAction,
+  SyncPayload,
 } from '../types';
 import {
   attendanceRepo,
@@ -45,7 +52,26 @@ import {
   writeCache,
   writeCacheSnapshot,
 } from '../lib/cache';
-import { addToOfflineQueue, clearOfflineQueue, getOfflineQueue } from '../utils/storage';
+import { ackItem, enqueueItem as queueEnqueueItem, readQueue } from '../lib/queue';
+import { replay } from '../lib/sync';
+import type { SyncClient } from '../lib/syncExecutors';
+import {
+  reconcileAttendances,
+  reconcileClasses,
+  reconcileEnrollments,
+  reconcilePayments,
+  reconcileStudents,
+  staleEnrollments,
+} from '../lib/reconcile';
+
+/** The real repo set satisfies the executor SyncClient contract. */
+const syncClient: SyncClient = {
+  students: studentsRepo,
+  classes: classesRepo,
+  payments: paymentsRepo,
+  attendances: attendanceRepo,
+  enrollments: enrollmentsRepo,
+};
 
 export interface DataContextValue {
   students: Student[];
@@ -55,8 +81,10 @@ export interface DataContextValue {
   enrollments: ClassEnrollment[];
   isOnline: boolean;
   queue: OfflineSyncItem[];
+  /** Fatal items (23505/409) surfaced for the quarantine badge (Q2). */
+  quarantinedCount: number;
 
-  /** Drain queue + refetch. Real FIFO replay lands with PR4 (sync.ts). */
+  /** FIFO replay of the offline queue (4.3); then refresh + reconcile. */
   syncNow: () => Promise<void>;
   resetData: () => Promise<void>;
 
@@ -85,7 +113,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [enrollments, setEnrollments] = useState<ClassEnrollment[]>(initial.enrollments);
 
   const [isOnline, setIsOnline] = useState<boolean>(() => navigator.onLine);
-  const [queue, setQueue] = useState<OfflineSyncItem[]>(() => getOfflineQueue());
+  const [queue, setQueue] = useState<OfflineSyncItem[]>(() => readQueue());
+  const [quarantinedCount, setQuarantinedCount] = useState<number>(0);
 
   // Keep refs in sync so async mutation handlers read the latest snapshot.
   const studentsRef = useRef(students);
@@ -124,25 +153,27 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
    * mode) the item still stays in memory so the UI pending-count is honest.
    */
   const enqueueItem = useCallback(
-    (action: SyncAction, entity: string, payload: unknown): void => {
-      const item: OfflineSyncItem = {
-        action,
-        entity,
-        payload,
-        id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        timestamp: new Date().toISOString(),
-      } as OfflineSyncItem;
+    (action: SyncAction, entity: string, payload: SyncPayload): void => {
       try {
-        addToOfflineQueue(item);
-        setQueue(getOfflineQueue());
+        queueEnqueueItem({ action, entity, payload });
+        setQueue(readQueue());
       } catch {
-        setQueue((prev) => [...prev, item]);
+        setQueue((prev) => [
+          ...prev,
+          {
+            id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            action,
+            entity,
+            payload,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
       }
     },
     [],
   );
 
-  /** Fetch every entity from Supabase; on success replace state + cache. */
+  /** Fetch every entity from Supabase; reconcile with the pending queue. */
   const refreshAll = useCallback(async () => {
     if (!isOnlineRef.current) return; // offline → keep the cache snapshot
     try {
@@ -153,29 +184,68 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         attendanceRepo.list(),
         enrollmentsRepo.list(),
       ]);
-      setStudents(results[0]);
-      setClasses(results[1]);
-      setPayments(results[2]);
-      setAttendances(results[3]);
-      setEnrollments(results[4]);
-      writeCacheSnapshot({
-        students: results[0],
-        classes: results[1],
-        payments: results[2],
-        attendances: results[3],
-        enrollments: results[4],
-      });
+      const queued = readQueue();
+      const students = reconcileStudents(results[0], queued);
+      const classes = reconcileClasses(results[1], queued);
+      const payments = reconcilePayments(results[2], queued);
+      const attendances = reconcileAttendances(results[3], queued);
+      const enrollments = reconcileEnrollments(results[4], queued);
+      setStudents(students);
+      setClasses(classes);
+      setPayments(payments);
+      setAttendances(attendances);
+      setEnrollments(enrollments);
+      writeCacheSnapshot({ students, classes, payments, attendances, enrollments });
     } catch {
-      // Transient / DB error: snapshot stays (reconcile lands in PR4 4.4).
+      // Transient / DB error: snapshot stays (retried by syncNow/refresh).
     }
   }, []);
 
-  // Boot: cache snapshot is the initial state; refresh from Supabase after.
+  /**
+   * Real FIFO replay (4.3/4.5, SYNC-REQ-3): success acks only that item;
+   * transient failure stops and keeps i..N for later; fatal items quarantine
+   * into the badge without stopping the rest (Q2). Then refresh + reconcile so
+   * the UI reflects what the server now holds.
+   */
+  const syncNow = useCallback(async () => {
+    if (!isOnlineRef.current) return;
+    const result = await replay(syncClient, {
+      list: readQueue,
+      ack: (id) => {
+        ackItem(id);
+        setQueue(readQueue());
+      },
+    });
+    if (result.quarantined.length > 0) {
+      setQuarantinedCount(result.quarantined.length);
+    }
+    if (result.acked.length > 0 || result.quarantined.length > 0) {
+      await refreshAll();
+    }
+  }, [refreshAll]);
+
+  const resetData = useCallback(async () => {
+    // DAL-REQ-7: no seed/import — reset clears client cache+queue and refetches
+    // the (empty) Supabase tables. The queue is drained per-item (never a
+    // whole-queue clear from sync; an explicit user reset may ack everything).
+    ['students', 'classes', 'payments', 'attendances', 'enrollments'].forEach((k) =>
+      writeCache(k as 'students', []),
+    );
+    readQueue().forEach((item) => ackItem(item.id));
+    setQueue([]);
+    setQuarantinedCount(0);
+    setIsOnline(true);
+    await refreshAll();
+  }, [refreshAll]);
+
+  // Boot: cache snapshot is the initial state; refresh from Supabase after, and
+  // drain the queue when coming back online / at boot (SYNC-REQ-3, Sequence B).
   useEffect(() => {
     void refreshAll();
+    void syncNow(); // replay any items left from a previous session
     const handleOnline = () => {
       setIsOnline(true);
-      void refreshAll();
+      void syncNow();
     };
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -184,27 +254,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [refreshAll]);
-
-  const syncNow = useCallback(async () => {
-    // PR4 4.5 replaces this placeholder with real FIFO replay. Until then,
-    // clearing the queue + refetching keeps the pending-count honest.
-    clearOfflineQueue();
-    setQueue([]);
-    await refreshAll();
-  }, [refreshAll]);
-
-  const resetData = useCallback(async () => {
-    // DAL-REQ-7: no seed/import — reset clears client cache+queue and refetches
-    // the (empty) Supabase tables.
-    ['students', 'classes', 'payments', 'attendances', 'enrollments'].forEach((k) =>
-      writeCache(k as 'students', []),
-    );
-    clearOfflineQueue();
-    setQueue([]);
-    setIsOnline(true);
-    await refreshAll();
-  }, [refreshAll]);
+  }, [refreshAll, syncNow]);
 
   // --- Write-through mutations (DAL-REQ-4) -------------------------------
   // Each mutation: optimistic state + cache first; then persist via repo when
@@ -251,6 +301,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       await classesRepo.upsert(cls).catch(() =>
         enqueueItem(exists ? 'UPDATE_CLASS' : 'CREATE_CLASS', 'ClassSchedule', cls),
       );
+      // Q3: shrink days_of_week -> prune junction rows for removed days online.
+      if (exists) {
+        const stale = staleEnrollments([cls], enrollmentsRef.current);
+        for (const enr of stale) {
+          await enrollmentsRepo.remove(enr.classId, enr.studentId, enr.dayOfWeek).catch(() => {
+            enqueueItem('UNENROLL_STUDENT', 'ClassEnrollment', enr);
+          });
+        }
+        if (stale.length > 0) {
+          const clean = enrollmentsRef.current.filter(
+            (e) => !stale.some((s) => s.classId === e.classId && s.studentId === e.studentId && s.dayOfWeek === e.dayOfWeek),
+          );
+          setEnrollments(clean);
+          writeCache('enrollments', clean);
+        }
+      }
     } else {
       enqueueItem(exists ? 'UPDATE_CLASS' : 'CREATE_CLASS', 'ClassSchedule', cls);
     }
@@ -369,6 +435,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       enrollments,
       isOnline,
       queue,
+      quarantinedCount,
       syncNow,
       resetData,
       upsertStudent,
@@ -390,6 +457,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       enrollments,
       isOnline,
       queue,
+      quarantinedCount,
       syncNow,
       resetData,
       upsertStudent,
