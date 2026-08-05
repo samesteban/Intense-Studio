@@ -1,7 +1,13 @@
 /**
  * Intense Studio - Main Gym Management Web Application
+ *
+ * Data state, connectivity and the offline queue are owned by the DataProvider
+ * (src/data/DataContext.tsx, tasks.md 3.7). This component consumes useData()
+ * instead of reading/writing localStorage directly (tasks.md 3.8, design
+ * decision 8): every mutation is write-through (DAL-REQ-4) and derived finance
+ * status is never persisted (DAL-REQ-6/STATUS-REQ-4).
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { HomeTab } from './components/HomeTab';
 import { StudentsTab } from './components/StudentsTab';
@@ -17,34 +23,28 @@ import { StudentProfileView } from './components/StudentProfileView';
 import { PinModal } from './components/PinModal';
 import { ConfirmModal } from './components/ConfirmModal';
 
-import {
-  AttendanceRecord,
-  ClassSchedule,
-  OfflineSyncItem,
-  Payment,
-  Student
-} from './types';
-
-import {
-  addToOfflineQueue,
-  clearOfflineQueue,
-  computeMemberStatus,
-  getAttendance,
-  getClasses,
-  getOfflineQueue,
-  getPayments,
-  getStudents,
-  initStorageSeed,
-  saveAttendance,
-  saveClasses,
-  savePayments,
-  saveStudents
-} from './utils/storage';
+import { AttendanceRecord, ClassSchedule, Payment, Student } from './types';
+import { useData } from './data/DataContext';
 
 export default function App() {
-  // Offline State Listener
-  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
-  const [pendingSyncQueue, setPendingSyncQueue] = useState<OfflineSyncItem[]>(getOfflineQueue());
+  const {
+    students,
+    classes,
+    payments,
+    attendances,
+    isOnline,
+    queue,
+    syncNow,
+    resetData,
+    upsertStudent,
+    deleteStudent,
+    saveClass,
+    deleteClass,
+    processPayment,
+    deletePayment,
+    recordAttendance,
+    cancelAttendance
+  } = useData();
 
   // Active Tab & PIN Protection
   const [activeTab, setActiveTab] = useState<string>('home');
@@ -70,12 +70,6 @@ export default function App() {
     setIsFinancesUnlocked(false);
     setActiveTab('home');
   };
-
-  // Core Gym Data
-  const [students, setStudentsState] = useState<Student[]>([]);
-  const [classes, setClassesState] = useState<ClassSchedule[]>([]);
-  const [payments, setPaymentsState] = useState<Payment[]>([]);
-  const [attendances, setAttendancesState] = useState<AttendanceRecord[]>([]);
 
   // Modals
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
@@ -106,50 +100,7 @@ export default function App() {
     onConfirm: () => {}
   });
 
-  // Initialize and update status on mount
-  useEffect(() => {
-    initStorageSeed();
-    refreshAllData();
-
-    const handleOnline = () => {
-      setIsOnline(true);
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  const refreshAllData = () => {
-    const rawStudents = getStudents();
-    const rawAtts = getAttendance();
-    const rawPays = getPayments();
-    const updatedStudents = rawStudents.map((s) => computeMemberStatus(s, rawAtts, rawPays));
-    saveStudents(updatedStudents);
-
-    setStudentsState(updatedStudents);
-    setClassesState(getClasses());
-    setPaymentsState(rawPays);
-    setAttendancesState(rawAtts);
-    setPendingSyncQueue(getOfflineQueue());
-  };
-
-  // Sync Offline Queue
-  const handleSyncOfflineData = () => {
-    if (pendingSyncQueue.length === 0) return;
-    clearOfflineQueue();
-    setPendingSyncQueue([]);
-    refreshAllData();
-  };
-
-  // Reset Demo Seed Data
+  // Reset Demo Seed Data (clears client cache + queue and refetches; DAL-REQ-7)
   const handleResetData = () => {
     setConfirmModal({
       isOpen: true,
@@ -157,8 +108,7 @@ export default function App() {
       message: 'Esta acción reiniciará el sistema con los alumnos, clases y pagos iniciales de prueba.',
       confirmText: 'Sí, Restablecer',
       onConfirm: () => {
-        initStorageSeed(true);
-        refreshAllData();
+        void resetData();
       }
     });
   };
@@ -187,58 +137,19 @@ export default function App() {
       recordedOffline: !isOnline
     };
 
-    const updatedAttendances = [newAttendance, ...attendances];
-    setAttendancesState(updatedAttendances);
-    saveAttendance(updatedAttendances);
-
-    // Recalculate student status after adding attendance
-    const updatedStudentsList = students.map((s) => computeMemberStatus(s, updatedAttendances, payments));
-    setStudentsState(updatedStudentsList);
-    saveStudents(updatedStudentsList);
-
-    if (!isOnline) {
-      addToOfflineQueue({
-        action: 'RECORD_ATTENDANCE',
-        entity: 'Attendance',
-        payload: newAttendance
-      });
-      setPendingSyncQueue(getOfflineQueue());
-    }
+    // Write-through: optimistic state + cache always; repo upsert online,
+    // offline item enqueued when offline (DAL-REQ-4). Status recomputes on
+    // render from derived status, never persisted.
+    void recordAttendance(newAttendance);
   };
 
   const handleCancelAttendance = (attendanceId: string) => {
-    const updatedAttendances = attendances.filter((a) => a.id !== attendanceId);
-    setAttendancesState(updatedAttendances);
-    saveAttendance(updatedAttendances);
-
-    const updatedStudentsList = students.map((s) => computeMemberStatus(s, updatedAttendances, payments));
-    setStudentsState(updatedStudentsList);
-    saveStudents(updatedStudentsList);
+    void cancelAttendance(attendanceId);
   };
 
   // Handlers: Student Save
   const handleSaveStudent = (newOrUpdatedStudent: Student) => {
-    const exists = students.some((s) => s.id === newOrUpdatedStudent.id);
-    const computed = computeMemberStatus(newOrUpdatedStudent, attendances, payments);
-    let updatedList: Student[] = [];
-
-    if (exists) {
-      updatedList = students.map((s) => (s.id === computed.id ? computed : s));
-    } else {
-      updatedList = [computed, ...students];
-    }
-
-    setStudentsState(updatedList);
-    saveStudents(updatedList);
-
-    if (!isOnline) {
-      addToOfflineQueue({
-        action: exists ? 'UPDATE_STUDENT' : 'CREATE_STUDENT',
-        entity: 'Student',
-        payload: computed
-      });
-      setPendingSyncQueue(getOfflineQueue());
-    }
+    void upsertStudent(newOrUpdatedStudent);
   };
 
   // Handlers: Delete Student
@@ -251,9 +162,7 @@ export default function App() {
       itemName: student ? student.name : undefined,
       confirmText: 'Sí, Eliminar Alumno',
       onConfirm: () => {
-        const updatedList = students.filter((s) => s.id !== studentId);
-        setStudentsState(updatedList);
-        saveStudents(updatedList);
+        void deleteStudent(studentId);
         if (selectedProfileStudent?.id === studentId) {
           setSelectedProfileStudent(null);
         }
@@ -263,32 +172,8 @@ export default function App() {
 
   // Handlers: Process Payment (Create or Edit)
   const handleProcessPayment = (payment: Payment) => {
-    const exists = payments.some((p) => p.id === payment.id);
-    let updatedPayments: Payment[] = [];
-
-    if (exists) {
-      updatedPayments = payments.map((p) => (p.id === payment.id ? payment : p));
-    } else {
-      updatedPayments = [payment, ...payments];
-    }
-
-    setPaymentsState(updatedPayments);
-    savePayments(updatedPayments);
-
-    const updatedStudentsList = students.map((s) => computeMemberStatus(s, attendances, updatedPayments));
-    setStudentsState(updatedStudentsList);
-    saveStudents(updatedStudentsList);
-
+    void processPayment(payment);
     setActiveReceipt(payment);
-
-    if (!isOnline) {
-      addToOfflineQueue({
-        action: 'CREATE_PAYMENT',
-        entity: 'Payment',
-        payload: payment
-      });
-      setPendingSyncQueue(getOfflineQueue());
-    }
   };
 
   // Handlers: Delete Payment
@@ -303,13 +188,7 @@ export default function App() {
         : undefined,
       confirmText: 'Sí, Eliminar Pago',
       onConfirm: () => {
-        const updatedPayments = payments.filter((p) => p.id !== paymentId);
-        setPaymentsState(updatedPayments);
-        savePayments(updatedPayments);
-
-        const updatedStudentsList = students.map((s) => computeMemberStatus(s, attendances, updatedPayments));
-        setStudentsState(updatedStudentsList);
-        saveStudents(updatedStudentsList);
+        void deletePayment(paymentId);
       }
     });
   };
@@ -328,17 +207,7 @@ export default function App() {
 
   // Handlers: Save Class
   const handleSaveClass = (cls: ClassSchedule) => {
-    const exists = classes.some((c) => c.id === cls.id);
-    let updatedList: ClassSchedule[] = [];
-
-    if (exists) {
-      updatedList = classes.map((c) => (c.id === cls.id ? cls : c));
-    } else {
-      updatedList = [...classes, cls];
-    }
-
-    setClassesState(updatedList);
-    saveClasses(updatedList);
+    void saveClass(cls);
   };
 
   // Handlers: Delete Class
@@ -351,9 +220,7 @@ export default function App() {
       itemName: cls ? `${cls.name} (${cls.startTime} hrs)` : undefined,
       confirmText: 'Sí, Eliminar Clase',
       onConfirm: () => {
-        const updatedList = classes.filter((c) => c.id !== classId);
-        setClassesState(updatedList);
-        saveClasses(updatedList);
+        void deleteClass(classId);
       }
     });
   };
@@ -367,11 +234,13 @@ export default function App() {
       {/* App Header */}
       <Header
         isOnline={isOnline}
-        pendingSyncCount={pendingSyncQueue.length}
+        pendingSyncCount={queue.length}
         activeTab={activeTab}
         setActiveTab={handleTabChange}
         onResetData={handleResetData}
-        onSync={handleSyncOfflineData}
+        onSync={() => {
+          void syncNow();
+        }}
       />
 
       {/* Main View Area */}
@@ -403,6 +272,7 @@ export default function App() {
                 students={students}
                 classes={classes}
                 payments={payments}
+                attendances={attendances}
                 onNavigateTab={handleTabChange}
                 onOpenNewClass={() => {
                   setClassToEdit(null);
@@ -428,6 +298,8 @@ export default function App() {
             {activeTab === 'students' && (
               <StudentsTab
                 students={students}
+                attendances={attendances}
+                payments={payments}
                 onOpenNewStudent={() => {
                   setStudentToEdit(null);
                   setIsStudentModalOpen(true);

@@ -9,7 +9,6 @@ import {
   Payment,
   Student
 } from '../types';
-import { calculateStudentFinances } from './pricing';
 
 const STORAGE_KEYS = {
   STUDENTS: 'gymcontrol_students_v3',
@@ -29,9 +28,6 @@ const INITIAL_STUDENTS: Student[] = [
     email: 'camila.m@gmail.com',
     registrationDate: '2026-06-15',
     active: true,
-    status: 'al_dia',
-    lastPaymentAmount: 10000,
-    lastPaymentDate: '2026-08-01',
     notes: 'Lesión leve en rodilla izquierda. Evitar sentadillas pesadas.'
   },
   {
@@ -41,9 +37,6 @@ const INITIAL_STUDENTS: Student[] = [
     email: 'rodrigo.f@hotm.com',
     registrationDate: '2026-05-10',
     active: true,
-    status: 'al_dia',
-    lastPaymentAmount: 15000,
-    lastPaymentDate: '2026-07-20',
     notes: 'Entrena CrossFit 19:00 hrs.'
   },
   {
@@ -53,9 +46,6 @@ const INITIAL_STUDENTS: Student[] = [
     email: 'valesilva@gmail.com',
     registrationDate: '2026-07-01',
     active: true,
-    status: 'con_deuda',
-    lastPaymentAmount: 5000,
-    lastPaymentDate: '2026-07-06',
     notes: 'Recordar pago de saldo vía WhatsApp.'
   },
   {
@@ -64,9 +54,6 @@ const INITIAL_STUDENTS: Student[] = [
     phone: '+56954321098',
     registrationDate: '2026-04-12',
     active: true,
-    status: 'con_deuda',
-    lastPaymentAmount: 0,
-    lastPaymentDate: '',
     notes: 'Registrado recientemente.'
   },
   {
@@ -76,9 +63,6 @@ const INITIAL_STUDENTS: Student[] = [
     email: 'javi.torres@outlook.cl',
     registrationDate: '2026-08-02',
     active: true,
-    status: 'al_dia',
-    lastPaymentAmount: 2500,
-    lastPaymentDate: '2026-08-03',
     notes: 'Pagado en efectivo clase individual.'
   },
   {
@@ -87,9 +71,6 @@ const INITIAL_STUDENTS: Student[] = [
     phone: '+56932109876',
     registrationDate: '2026-07-15',
     active: true,
-    status: 'al_dia',
-    lastPaymentAmount: 10000,
-    lastPaymentDate: '2026-07-15',
     notes: 'Al día.'
   }
 ];
@@ -314,14 +295,4 @@ export function addToOfflineQueue(item: Omit<OfflineSyncItem, 'id' | 'timestamp'
 
 export function clearOfflineQueue() {
   localStorage.setItem(STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify([]));
-}
-
-export function computeMemberStatus(student: Student, allAttendances?: AttendanceRecord[], allPayments?: Payment[]): Student {
-  const atts = allAttendances || getAttendance();
-  const pays = allPayments || getPayments();
-  const summary = calculateStudentFinances(student.id, atts, pays);
-  return {
-    ...student,
-    status: summary.status
-  };
 }

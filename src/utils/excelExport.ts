@@ -3,6 +3,8 @@
  */
 import * as XLSX from 'xlsx';
 import { AttendanceRecord, Payment, Student } from '../types';
+import { calculateStudentFinances } from './pricing';
+import { deriveStudentStatus } from '../lib/status';
 
 export function exportAttendanceToExcel(
   attendances: AttendanceRecord[],
@@ -94,17 +96,37 @@ export function exportIncomeReportToExcel(payments: Payment[], monthLabel: strin
   XLSX.writeFile(workbook, fileName);
 }
 
-export function exportStudentsListToExcel(students: Student[]) {
-  const data = students.map((s, idx) => ({
-    '#': idx + 1,
-    'ID': s.id,
-    'Nombre Completo': s.name,
-    'Teléfono': s.phone,
-    'Estado': s.status === 'al_dia' ? 'AL DÍA' : 'CON DEUDA',
-    'Último Pago ($)': s.lastPaymentAmount || 0,
-    'Fecha Registro': s.registrationDate,
-    'Notas': s.notes || ''
-  }));
+export function exportStudentsListToExcel(
+  students: Student[],
+  attendances: AttendanceRecord[],
+  payments: Payment[]
+) {
+  const data = students.map((s, idx) => {
+    // Derived status + last payment are computed from the live data at export
+    // time (DAL-REQ-6 / STATUS-REQ-4 / S1): never read from stored fields.
+    const info = deriveStudentStatus(
+      s.active,
+      calculateStudentFinances(s.id, attendances, payments)
+    );
+    const latestPayment = payments
+      .filter((p) => p.studentId === s.id)
+      .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate))[0];
+
+    return {
+      '#': idx + 1,
+      'ID': s.id,
+      'Nombre Completo': s.name,
+      'Teléfono': s.phone,
+      'Estado': !info.active
+        ? 'INACTIVO'
+        : info.status === 'al_dia'
+          ? 'AL DÍA'
+          : 'CON DEUDA',
+      'Último Pago ($)': latestPayment?.amount ?? 0,
+      'Fecha Registro': s.registrationDate,
+      'Notas': s.notes || ''
+    };
+  });
 
   const worksheet = XLSX.utils.json_to_sheet(data);
   worksheet['!cols'] = [

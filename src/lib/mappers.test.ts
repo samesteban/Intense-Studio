@@ -72,15 +72,15 @@ describe('student mappers', () => {
   });
 
   it('never writes derived finance fields (DAL-REQ-6)', () => {
+    // The derived fields were dropped from Student with the derive pipeline
+    // (Slice 3b2) — they cannot even appear on the persistence row.
     const row = studentToRow({
       id: 'std-1',
       name: 'Camila',
       phone: '+56911111111',
       registrationDate: '2026-06-15',
       active: true,
-      status: 'con_deuda',
-      lastPaymentAmount: 5000,
-      lastPaymentDate: '2026-07-06',
+      notes: 'lesión leve',
     });
 
     expect(row).not.toHaveProperty('status');

@@ -23,6 +23,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { AttendanceRecord, ClassSchedule, Student } from '../types';
+import { useData } from '../data/DataContext';
 
 interface ScheduleTabProps {
   classes: ClassSchedule[];
@@ -35,8 +36,6 @@ interface ScheduleTabProps {
   onCancelAttendance?: (attendanceId: string) => void;
   onOpenPaymentModal?: (student: Student) => void;
 }
-
-import { getClassEnrollments, saveClassEnrollments, getEnrolledStudentIds as getEnrolledStudentIdsUtil } from '../utils/enrollment';
 
 interface SearchableStudentSelectProps {
   students: Student[];
@@ -176,8 +175,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   const [selectedDayOfWeek, setSelectedDayOfWeek] = useState<number>(new Date().getDay() || 7); // 1=Mon ... 7=Sun
   const [selectedClassForDetails, setSelectedClassForDetails] = useState<ClassSchedule | null>(null);
 
-  // Enrollments & Roster state
-  const [enrollments, setEnrollments] = useState<Record<string, string[]>>(() => getClassEnrollments());
+  // Enrollments come from the DataProvider (ClassEnrollment[] junction rows,
+  // design decision 9); writes go through the write-through mutations instead
+  // of a local localStorage Record (3.10 retires enrollment.ts / DAL-REQ-4).
+  const { enrollments, enrollStudent, unenrollStudent } = useData();
   const [rosterSearch, setRosterSearch] = useState('');
   const [studentToEnroll, setStudentToEnroll] = useState('');
 
@@ -260,7 +261,9 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
   // Get list of enrolled student IDs for a class on a specific day of week
   const getEnrolledStudentIds = (classId: string, dayOfWeek: number = selectedDayOfWeek): string[] => {
-    return getEnrolledStudentIdsUtil(enrollments, classId, dayOfWeek);
+    return enrollments
+      .filter((e) => e.classId === classId && e.dayOfWeek === dayOfWeek)
+      .map((e) => e.studentId);
   };
 
   // Count enrolled students for a class on a specific day of week (occupies quota)
@@ -283,14 +286,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
     const classId = selectedClassForDetails.id;
     const dayOfWeek = selectedDayOfWeek;
-    const specificKey = `${classId}_day_${dayOfWeek}`;
 
     const currentList = getEnrolledStudentIds(classId, dayOfWeek);
     if (!currentList.includes(studentToEnroll)) {
-      const updatedList = [...currentList, studentToEnroll];
-      const updated = { ...enrollments, [specificKey]: updatedList };
-      setEnrollments(updated);
-      saveClassEnrollments(updated);
+      void enrollStudent({ classId, studentId: studentToEnroll, dayOfWeek });
     }
     setStudentToEnroll('');
   };
@@ -299,13 +298,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
     if (!selectedClassForDetails) return;
     const classId = selectedClassForDetails.id;
     const dayOfWeek = selectedDayOfWeek;
-    const specificKey = `${classId}_day_${dayOfWeek}`;
-
-    const currentList = getEnrolledStudentIds(classId, dayOfWeek);
-    const updatedList = currentList.filter((r) => r !== studentId);
-    const updated = { ...enrollments, [specificKey]: updatedList };
-    setEnrollments(updated);
-    saveClassEnrollments(updated);
+    void unenrollStudent({ classId, studentId, dayOfWeek });
   };
 
   return (
