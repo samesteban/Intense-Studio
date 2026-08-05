@@ -75,11 +75,6 @@ export interface DataContextValue {
 
 const DataContext = createContext<DataContextValue | null>(null);
 
-/** Enqueue an offline sync item under the existing queue key. */
-function enqueue(action: SyncAction, entity: string, payload: unknown): void {
-  addToOfflineQueue({ action, entity, payload });
-}
-
 export function DataProvider({ children }: { children: React.ReactNode }) {
   // Cache-first initial state (DAL-REQ-3 first paint).
   const initial = useMemo(readCacheSnapshot, []);
@@ -118,6 +113,34 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     isOnlineRef.current = isOnline;
   }, [isOnline]);
+
+  /**
+   * Persist an offline sync item and reflect it in the queue state.
+   *
+   * Used by the offline write path AND as the fallback when an ONLINE repo
+   * write fails (PR3b review W1): a transient online failure must not swallow
+   * the mutation — the item is queued for the PR4 replay instead of being lost.
+   * The queue write is best-effort: if localStorage throws (quota / private
+   * mode) the item still stays in memory so the UI pending-count is honest.
+   */
+  const enqueueItem = useCallback(
+    (action: SyncAction, entity: string, payload: unknown): void => {
+      const item: OfflineSyncItem = {
+        action,
+        entity,
+        payload,
+        id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: new Date().toISOString(),
+      };
+      try {
+        addToOfflineQueue(item);
+        setQueue(getOfflineQueue());
+      } catch {
+        setQueue((prev) => [...prev, item]);
+      }
+    },
+    [],
+  );
 
   /** Fetch every entity from Supabase; on success replace state + cache. */
   const refreshAll = useCallback(async () => {
@@ -184,6 +207,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [refreshAll]);
 
   // --- Write-through mutations (DAL-REQ-4) -------------------------------
+  // Each mutation: optimistic state + cache first; then persist via repo when
+  // online (falling back to the offline queue if the write fails — W1), or
+  // enqueue an offline sync item directly when offline.
 
   const upsertStudent = useCallback(async (student: Student) => {
     const exists = studentsRef.current.some((s) => s.id === student.id);
@@ -193,24 +219,26 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setStudents(next);
     writeCache('students', next);
     if (isOnlineRef.current) {
-      await studentsRepo.upsert(student).catch(() => undefined);
+      await studentsRepo.upsert(student).catch(() =>
+        enqueueItem(exists ? 'UPDATE_STUDENT' : 'CREATE_STUDENT', 'Student', student),
+      );
     } else {
-      enqueue(exists ? 'UPDATE_STUDENT' : 'CREATE_STUDENT', 'Student', student);
-      setQueue(getOfflineQueue());
+      enqueueItem(exists ? 'UPDATE_STUDENT' : 'CREATE_STUDENT', 'Student', student);
     }
-  }, []);
+  }, [enqueueItem]);
 
   const deleteStudent = useCallback(async (studentId: string) => {
     const next = studentsRef.current.filter((s) => s.id !== studentId);
     setStudents(next);
     writeCache('students', next);
     if (isOnlineRef.current) {
-      await studentsRepo.remove(studentId).catch(() => undefined);
+      await studentsRepo.remove(studentId).catch(() =>
+        enqueueItem('DELETE_STUDENT', 'Student', { id: studentId }),
+      );
     } else {
-      enqueue('DELETE_STUDENT', 'Student', { id: studentId });
-      setQueue(getOfflineQueue());
+      enqueueItem('DELETE_STUDENT', 'Student', { id: studentId });
     }
-  }, []);
+  }, [enqueueItem]);
 
   const saveClass = useCallback(async (cls: ClassSchedule) => {
     const exists = classesRef.current.some((c) => c.id === cls.id);
@@ -220,24 +248,26 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setClasses(next);
     writeCache('classes', next);
     if (isOnlineRef.current) {
-      await classesRepo.upsert(cls).catch(() => undefined);
+      await classesRepo.upsert(cls).catch(() =>
+        enqueueItem(exists ? 'UPDATE_CLASS' : 'CREATE_CLASS', 'ClassSchedule', cls),
+      );
     } else {
-      enqueue(exists ? 'UPDATE_CLASS' : 'CREATE_CLASS', 'ClassSchedule', cls);
-      setQueue(getOfflineQueue());
+      enqueueItem(exists ? 'UPDATE_CLASS' : 'CREATE_CLASS', 'ClassSchedule', cls);
     }
-  }, []);
+  }, [enqueueItem]);
 
   const deleteClass = useCallback(async (classId: string) => {
     const next = classesRef.current.filter((c) => c.id !== classId);
     setClasses(next);
     writeCache('classes', next);
     if (isOnlineRef.current) {
-      await classesRepo.remove(classId).catch(() => undefined);
+      await classesRepo.remove(classId).catch(() =>
+        enqueueItem('DELETE_CLASS', 'ClassSchedule', { id: classId }),
+      );
     } else {
-      enqueue('DELETE_CLASS', 'ClassSchedule', { id: classId });
-      setQueue(getOfflineQueue());
+      enqueueItem('DELETE_CLASS', 'ClassSchedule', { id: classId });
     }
-  }, []);
+  }, [enqueueItem]);
 
   const processPayment = useCallback(async (payment: Payment) => {
     const exists = paymentsRef.current.some((p) => p.id === payment.id);
@@ -247,48 +277,52 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setPayments(next);
     writeCache('payments', next);
     if (isOnlineRef.current) {
-      await paymentsRepo.upsert(payment).catch(() => undefined);
+      await paymentsRepo.upsert(payment).catch(() =>
+        enqueueItem('CREATE_PAYMENT', 'Payment', payment),
+      );
     } else {
-      enqueue('CREATE_PAYMENT', 'Payment', payment);
-      setQueue(getOfflineQueue());
+      enqueueItem('CREATE_PAYMENT', 'Payment', payment);
     }
-  }, []);
+  }, [enqueueItem]);
 
   const deletePayment = useCallback(async (paymentId: string) => {
     const next = paymentsRef.current.filter((p) => p.id !== paymentId);
     setPayments(next);
     writeCache('payments', next);
     if (isOnlineRef.current) {
-      await paymentsRepo.remove(paymentId).catch(() => undefined);
+      await paymentsRepo.remove(paymentId).catch(() =>
+        enqueueItem('DELETE_PAYMENT', 'Payment', { id: paymentId }),
+      );
     } else {
-      enqueue('DELETE_PAYMENT', 'Payment', { id: paymentId });
-      setQueue(getOfflineQueue());
+      enqueueItem('DELETE_PAYMENT', 'Payment', { id: paymentId });
     }
-  }, []);
+  }, [enqueueItem]);
 
   const recordAttendance = useCallback(async (att: AttendanceRecord) => {
     const next = [att, ...attendancesRef.current];
     setAttendances(next);
     writeCache('attendances', next);
     if (isOnlineRef.current) {
-      await attendanceRepo.upsert(att).catch(() => undefined);
+      await attendanceRepo.upsert(att).catch(() =>
+        enqueueItem('RECORD_ATTENDANCE', 'Attendance', att),
+      );
     } else {
-      enqueue('RECORD_ATTENDANCE', 'Attendance', att);
-      setQueue(getOfflineQueue());
+      enqueueItem('RECORD_ATTENDANCE', 'Attendance', att);
     }
-  }, []);
+  }, [enqueueItem]);
 
   const cancelAttendance = useCallback(async (attendanceId: string) => {
     const next = attendancesRef.current.filter((a) => a.id !== attendanceId);
     setAttendances(next);
     writeCache('attendances', next);
     if (isOnlineRef.current) {
-      await attendanceRepo.remove(attendanceId).catch(() => undefined);
+      await attendanceRepo.remove(attendanceId).catch(() =>
+        enqueueItem('DELETE_ATTENDANCE', 'Attendance', { id: attendanceId }),
+      );
     } else {
-      enqueue('DELETE_ATTENDANCE', 'Attendance', { id: attendanceId });
-      setQueue(getOfflineQueue());
+      enqueueItem('DELETE_ATTENDANCE', 'Attendance', { id: attendanceId });
     }
-  }, []);
+  }, [enqueueItem]);
 
   const enrollStudent = useCallback(async (enr: ClassEnrollment) => {
     const next = enrollmentsRef.current.find(
@@ -302,12 +336,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setEnrollments(next);
     writeCache('enrollments', next);
     if (isOnlineRef.current) {
-      await enrollmentsRepo.upsert(enr).catch(() => undefined);
+      await enrollmentsRepo.upsert(enr).catch(() =>
+        enqueueItem('ENROLL_STUDENT', 'ClassEnrollment', enr),
+      );
     } else {
-      enqueue('ENROLL_STUDENT', 'ClassEnrollment', enr);
-      setQueue(getOfflineQueue());
+      enqueueItem('ENROLL_STUDENT', 'ClassEnrollment', enr);
     }
-  }, []);
+  }, [enqueueItem]);
 
   const unenrollStudent = useCallback(async (enr: ClassEnrollment) => {
     const next = enrollmentsRef.current.filter(
@@ -319,12 +354,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (isOnlineRef.current) {
       await enrollmentsRepo
         .remove(enr.classId, enr.studentId, enr.dayOfWeek)
-        .catch(() => undefined);
+        .catch(() => enqueueItem('UNENROLL_STUDENT', 'ClassEnrollment', enr));
     } else {
-      enqueue('UNENROLL_STUDENT', 'ClassEnrollment', enr);
-      setQueue(getOfflineQueue());
+      enqueueItem('UNENROLL_STUDENT', 'ClassEnrollment', enr);
     }
-  }, []);
+  }, [enqueueItem]);
 
   const value = useMemo<DataContextValue>(
     () => ({
