@@ -2,7 +2,7 @@
  * Students Roster Management Tab
  * Full student list with WhatsApp integration, profile modal and Excel export
  */
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Users,
   Search,
@@ -17,12 +17,16 @@ import {
   Edit2,
   Trash2
 } from 'lucide-react';
-import { Student } from '../types';
+import { AttendanceRecord, Payment, Student } from '../types';
 import { getWhatsAppLink } from '../utils/whatsapp';
 import { exportStudentsListToExcel } from '../utils/excelExport';
+import { calculateStudentFinances } from '../utils/pricing';
+import { deriveStudentStatus } from '../lib/status';
 
 interface StudentsTabProps {
   students: Student[];
+  attendances: AttendanceRecord[];
+  payments: Payment[];
   onOpenNewStudent: () => void;
   onEditStudent: (student: Student) => void;
   onDeleteStudent: (studentId: string) => void;
@@ -32,6 +36,8 @@ interface StudentsTabProps {
 
 export const StudentsTab: React.FC<StudentsTabProps> = ({
   students,
+  attendances,
+  payments,
   onOpenNewStudent,
   onEditStudent,
   onDeleteStudent,
@@ -41,17 +47,30 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'todos' | 'al_dia' | 'con_deuda'>('todos');
 
+  // Derived status per student, recomputed via useMemo whenever attendances or
+  // payments change (STATUS-REQ-2/4, DAL-REQ-6). Inactive students yield no
+  // finance status, so they are excluded from the al_dia/con_deuda filters.
+  const statusByStudent = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof deriveStudentStatus>>();
+    students.forEach((s) => {
+      const finances = calculateStudentFinances(s.id, attendances, payments);
+      map.set(s.id, deriveStudentStatus(s.active, finances));
+    });
+    return map;
+  }, [students, attendances, payments]);
+
   const filteredStudents = students.filter((s) => {
     const matchesSearch =
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.phone.includes(searchTerm);
 
     if (statusFilter === 'todos') return matchesSearch;
-    return matchesSearch && s.status === statusFilter;
+    const info = statusByStudent.get(s.id);
+    return matchesSearch && info?.active === true && info.status === statusFilter;
   });
 
   const handleExportExcel = () => {
-    exportStudentsListToExcel(filteredStudents);
+    exportStudentsListToExcel(filteredStudents, attendances, payments);
   };
 
   return (
@@ -155,18 +174,28 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                       <h3 className="font-black text-white text-lg leading-tight">{student.name}</h3>
                     </div>
 
-                    {/* Status Badge */}
-                    {student.status === 'al_dia' ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full uppercase">
-                        <CheckCircle2 className="w-3 h-3" />
-                        Al Día
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2 py-0.5 rounded-full uppercase">
-                        <AlertTriangle className="w-3 h-3" />
-                        Con Deuda
-                      </span>
-                    )}
+                    {/* Status Badge (derived, STATUS-REQ-2/6) */}
+                    {(() => {
+                      const info = statusByStudent.get(student.id);
+                      if (!info || !info.active) {
+                        return (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black bg-slate-800 text-slate-400 border border-slate-600 px-2 py-0.5 rounded-full uppercase">
+                            Inactivo
+                          </span>
+                        );
+                      }
+                      return info.status === 'al_dia' ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full uppercase">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Al Día
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2 py-0.5 rounded-full uppercase">
+                          <AlertTriangle className="w-3 h-3" />
+                          Con Deuda
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   {/* Info Details */}

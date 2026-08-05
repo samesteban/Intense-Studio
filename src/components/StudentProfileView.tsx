@@ -27,6 +27,7 @@ import {
 import { AttendanceRecord, Payment, Student } from '../types';
 import { getWhatsAppLink } from '../utils/whatsapp';
 import { calculateStudentFinances } from '../utils/pricing';
+import { useMemberStatus } from '../hooks/useMemberStatus';
 
 interface StudentProfileViewProps {
   student: Student;
@@ -73,6 +74,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
   const finances = useMemo(() => {
     return calculateStudentFinances(student.id, attendances, payments);
   }, [student.id, attendances, payments]);
+
+  // Derived display status (STATUS-REQ-2/6): inactive students show the
+  // inactive marker, never a finance badge (deriveStudentStatus/useMemberStatus).
+  const memberStatus = useMemberStatus(student, attendances, payments);
 
   // KPI 1: Classes attended in the current month (e.g. YYYY-MM)
   const currentMonthKey = new Date().toISOString().slice(0, 7); // e.g. "2026-08"
@@ -231,7 +236,11 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-black text-white leading-tight">{student.name}</h1>
-                {finances.status === 'al_dia' ? (
+                {!memberStatus.active ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black bg-slate-800 text-slate-400 border border-slate-600 px-2.5 py-1 rounded-full uppercase">
+                    Inactivo
+                  </span>
+                ) : memberStatus.status === 'al_dia' ? (
                   <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2.5 py-1 rounded-full uppercase">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Al Día
