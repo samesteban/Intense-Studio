@@ -211,13 +211,13 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="text-slate-400 text-xs font-semibold">Al Día</div>
             <div className="text-xl font-black text-emerald-400 mt-0.5">
-              {students.filter((s) => statusByStudent.get(s.id)?.status === 'al_dia').length}
+              {students.filter((s) => { const st = statusByStudent.get(s.id); return st?.active && st.status === 'al_dia'; }).length}
             </div>
           </div>
           <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="text-slate-400 text-xs font-semibold">Con Deuda</div>
             <div className="text-xl font-black text-amber-400 mt-0.5">
-              {students.filter((s) => statusByStudent.get(s.id)?.status === 'con_deuda').length}
+              {students.filter((s) => { const st = statusByStudent.get(s.id); return st?.active && st.status === 'con_deuda'; }).length}
             </div>
           </div>
           <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -713,7 +713,13 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                           </div>
                           <div>
                             <span className="font-bold text-white block">{st.name}</span>
-                            <span className="text-[10px] text-slate-400">{st.status === 'al_dia' ? 'Al día' : 'Con deuda'}</span>
+                            <span className="text-[10px] text-slate-400">
+                              {(() => {
+                                const info = statusByStudent.get(st.id);
+                                if (!info || !info.active) return 'Inactivo';
+                                return info.status === 'al_dia' ? 'Al día' : 'Con deuda';
+                              })()}
+                            </span>
                           </div>
                         </div>
 

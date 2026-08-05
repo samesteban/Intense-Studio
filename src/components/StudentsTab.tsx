@@ -65,7 +65,8 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
       s.phone.includes(searchTerm);
 
     if (statusFilter === 'todos') return matchesSearch;
-    return matchesSearch && statusByStudent.get(s.id)?.status === statusFilter;
+    const info = statusByStudent.get(s.id);
+    return matchesSearch && info?.active === true && info.status === statusFilter;
   });
 
   const handleExportExcel = () => {
