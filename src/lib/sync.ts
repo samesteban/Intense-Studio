@@ -20,6 +20,7 @@ import type { OfflineSyncItem } from '../types';
 import {
   isFatalReplayError,
   runExecutor,
+  type ReplayError,
   type SyncClient,
 } from './syncExecutors';
 
@@ -62,7 +63,7 @@ export async function replay(
       queue.ack(item.id);
       result.acked.push(item);
     } catch (err) {
-      if (isFatalReplayError(err)) {
+      if ((err as ReplayError).isFatal || isFatalReplayError(err)) {
         // Quarantine: do NOT ack, do NOT stop the queue (Q2 resolution).
         result.quarantined.push(item);
         continue;

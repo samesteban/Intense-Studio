@@ -159,12 +159,14 @@ describe('robustness', () => {
     expect(readQueue()).toEqual([]);
   });
 
-  it('does not throw when storage write is unavailable', () => {
+  it('enqueue surfaces storage-write failure; read falls back to empty (F3)', () => {
     const ls = (globalThis as { localStorage: Storage }).localStorage;
     ls.setItem = () => {
       throw new Error('QuotaExceededError');
     };
-    expect(() => enqueueItem(base)).not.toThrow();
+    // F3: enqueue MUST throw so DataContext's in-memory fallback engages
+    // instead of silently dropping the item.
+    expect(() => enqueueItem(base)).toThrow(/queue write failed/);
     // read falls back to empty when storage read throws
     ls.getItem = () => {
       throw new Error('denied');

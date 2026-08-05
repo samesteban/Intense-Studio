@@ -139,4 +139,44 @@ describe('FIFO sequential replay (SYNC-REQ-3)', () => {
     expect(remaining).toContain('B');
     expect(remaining).toContain('C');
   });
+
+  it('fatal 409 WITHOUT a 23505 message quarantines and CONTINUES (F1 regression)', async () => {
+    const items = trio();
+    // B is a payment whose replay rejects with PostgREST 409 but a generic
+    // "Conflict" message (no SQLSTATE in the body). runExecutor tags it fatal
+    // via status and replay must honor the tag even when the degraded wrapper
+    // loses the message — it must quarantine + continue, NOT stop the run.
+    items[1] = {
+      ...items[1],
+      id: 'B',
+      action: 'CREATE_PAYMENT',
+      entity: 'Payment',
+      payload: {
+        id: 'pay-409',
+        studentId: 'std-1',
+        studentName: 'X',
+        amount: 1000,
+        paymentMethod: 'efectivo',
+        paymentDate: '2026-08-01',
+        receiptNumber: 'REC-409',
+      },
+    };
+    const q = makeQueue(items);
+    const client = fakeClient();
+    client.payments.upsert = () => {
+      const err = new Error('Conflict') as Error & { status: number };
+      err.status = 409;
+      return Promise.reject(err);
+    };
+
+    const result = await replay(client, q);
+
+    // A acked; B quarantined (kept, not acked, run NOT stopped); C still replayed.
+    expect(result.acked.map((i) => i.id)).toEqual(['A', 'C']);
+    expect(result.quarantined.map((i) => i.id)).toEqual(['B']);
+    expect(result.stoppedOnError).toBe(false);
+    const remaining = q.remaining().map((i) => i.id);
+    expect(remaining).toContain('B');
+    expect(remaining).not.toContain('C');
+  });
 });

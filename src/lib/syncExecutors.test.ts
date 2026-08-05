@@ -220,11 +220,27 @@ describe('DELETE_ATTENDANCE by id (Q1 resolution)', () => {
 });
 
 describe('fatal vs transient classification (Q2)', () => {
-  it('isFatalReplayError matches 23505 / duplicate / unique / 409', () => {
+  it('isFatalReplayError matches 23505 / 23503 / duplicate / unique / FK / 409', () => {
     expect(isFatalReplayError(new Error('duplicate key value violates unique constraint "payments_receipt_number_key" (23505)'))).toBe(true);
+    expect(isFatalReplayError(new Error('insert or update on table "payments" violates foreign key constraint "payments_student_id_fkey" (23503)'))).toBe(true);
     expect(isFatalReplayError(Object.assign(new Error('Conflict'), { status: 409 }))).toBe(true);
     expect(isFatalReplayError(new Error('fetch failed (network down)'))).toBe(false);
     expect(isFatalReplayError(new Error('students.list failed'))).toBe(false);
+  });
+
+  it('runExecutor 409 wrapper preserves status for downstream classification (F1)', async () => {
+    const c = createFakeClient();
+    c.payments.upsert = () => {
+      const err = new Error('Conflict') as Error & { status: number };
+      err.status = 409;
+      return Promise.reject(err);
+    };
+    await expect(
+      runExecutor(
+        c,
+        item({ action: 'CREATE_PAYMENT' }),
+      ),
+    ).rejects.toSatisfy((e) => isFatalReplayError(e));
   });
 
   it('runExecutor rethrows 23505 wrapped as isFatal', async () => {

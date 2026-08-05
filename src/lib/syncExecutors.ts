@@ -71,13 +71,16 @@ function payloadOf<T>(item: OfflineSyncItem): T {
   return item.payload as T;
 }
 
-/** Errors to quarantine: Postgres 23505 / Postgrest HTTP 409 (Q2 resolution). */
+/** Errors to quarantine: Postgres 23505/23503 / Postgrest HTTP 409 (Q2 resolution). */
 export function isFatalReplayError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   if ((err as Error & { status?: number }).status === 409) return true;
-  // Postgrest wraps the 23505 SQLSTATE in the message, e.g.
+  // Postgrest wraps the SQLSTATE in the message, e.g.
   // "duplicate key value violates unique constraint ... 23505".
-  return /23505|duplicate key|unique constraint/i.test(err.message);
+  // 23503 = FK violation: replaying e.g. a payment for a deleted student can
+  // never succeed after the parent row is gone -> non-retryable, quarantine
+  // instead of retrying forever (F2).
+  return /23505|23503|duplicate key|unique constraint|foreign key/i.test(err.message);
 }
 
 /**
@@ -135,8 +138,11 @@ export async function runExecutor(
     if (isFatalReplayError(err)) {
       const wrapped = new Error(
         `${item.action} failed: ${err instanceof Error ? err.message : String(err)}`,
-      ) as ReplayError;
+      ) as ReplayError & { status?: number };
       wrapped.isFatal = true;
+      // Preserve the original HTTP status so downstream classification
+      // (isFatalReplayError on the degraded wrapper) still sees a 409.
+      wrapped.status = (err as Error & { status?: number }).status;
       throw wrapped;
     }
     throw err;

@@ -52,11 +52,17 @@ export function readQueue(): OfflineSyncItem[] {
   }
 }
 
-function writeRaw(items: OfflineSyncItem[]): void {
+/**
+ * Persist the queue. Returns false when localStorage is unavailable (quota /
+ * private mode) so callers can decide: enqueue surfaces the failure to the
+ * in-memory fallback; ack tolerates it (a missing ack just replays again).
+ */
+function writeRaw(items: OfflineSyncItem[]): boolean {
   try {
     globalThis.localStorage.setItem(QUEUE_KEY, JSON.stringify(items));
+    return true;
   } catch {
-    // Quota / private-mode failure: non-fatal for replay (in-memory stays).
+    return false; // Quota / private-mode failure: caller decides.
   }
 }
 
@@ -77,7 +83,12 @@ export function enqueueItem(
     id: nextQueueId(),
     timestamp: new Date().toISOString(),
   };
-  writeRaw([...queue, full]);
+  const persisted = writeRaw([...queue, full]);
+  if (!persisted) {
+    // Surface the storage failure so callers can fall back to in-memory state
+    // (DataContext.enqueueItem catch) instead of silently dropping the item.
+    throw new Error('queue write failed: localStorage unavailable');
+  }
   return full;
 }
 
