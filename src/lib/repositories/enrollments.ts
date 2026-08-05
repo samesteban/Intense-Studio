@@ -15,6 +15,14 @@ export interface EnrollmentsRepo {
   list(): Promise<ClassEnrollment[]>;
   upsert(enr: ClassEnrollment, opts?: UpsertOptions): Promise<void>;
   remove(classId: string, studentId: string, dayOfWeek: number): Promise<void>;
+  /**
+   * Prune every junction row for a class whose `day_of_week` is no longer in
+   * the class's `days_of_week` (Q3 resolution / design.md Risk "junction drift
+   * when days_of_week shrinks"). Idempotent: rows on still-allowed days are
+   * untouched, rows on removed days are deleted, 0 affected rows = success.
+   * `allowedDays` comes from the class's current `days_of_week`.
+   */
+  pruneDays(classId: string, allowedDays: number[]): Promise<void>;
 }
 
 export const enrollmentsRepo: EnrollmentsRepo = {
@@ -49,5 +57,17 @@ export const enrollmentsRepo: EnrollmentsRepo = {
       .eq('student_id', studentId)
       .eq('day_of_week', dayOfWeek);
     if (error) throw repoError('enrollments.remove', error);
+  },
+
+  async pruneDays(classId: string, allowedDays: number[]): Promise<void> {
+    let query = supabaseClient
+      .from(TABLE)
+      .delete()
+      .eq('class_id', classId);
+    if (allowedDays.length > 0) {
+      query = query.not('day_of_week', 'in', `(${allowedDays.join(',')})`);
+    }
+    const { error } = await query;
+    if (error) throw repoError('enrollments.pruneDays', error);
   },
 };

@@ -68,13 +68,24 @@ function createFakeClient(): SyncClient & { calls: unknown[][]; store: Record<st
     sync('enrollments');
     return Promise.resolve();
   };
+  const enrollPrune = (classId: string, allowedDays: number[]) => {
+    calls.push(['enrollments.pruneDays', { classId, allowedDays }, undefined]);
+    for (const [key, row] of Array.from(tables.enrollments.entries())) {
+      const enr = row as { classId: string; dayOfWeek: number };
+      if (enr.classId === classId && !allowedDays.includes(enr.dayOfWeek)) {
+        tables.enrollments.delete(key);
+      }
+    }
+    sync('enrollments');
+    return Promise.resolve();
+  };
 
   const client: SyncClient = {
     students: { upsert: upsert('students'), remove: remove('students') },
     classes: { upsert: upsert('classes'), remove: remove('classes') },
     payments: { upsert: upsert('payments'), remove: remove('payments') },
     attendances: { upsert: upsert('attendances'), remove: remove('attendance') },
-    enrollments: { upsert: enrollUpsert, remove: enrollRemove },
+    enrollments: { upsert: enrollUpsert, remove: enrollRemove, pruneDays: enrollPrune },
   };
   return { ...client, calls, store };
 }
@@ -216,6 +227,26 @@ describe('DELETE_ATTENDANCE by id (Q1 resolution)', () => {
     await expect(
       runExecutor(c, item({ action: 'DELETE_ATTENDANCE', payload: { id: 'att-nope' } })),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('UPDATE_CLASS prunes junction rows for removed days (Q3)', () => {
+  it('calls enrollments.pruneDays with the new days_of_week after the upsert', async () => {
+    const c = createFakeClient();
+    const cls = {
+      id: 'class-1',
+      name: 'CrossFit',
+      startTime: '08:00',
+      endTime: '09:00',
+      daysOfWeek: [1, 5], // day 3 was removed
+      maxCapacity: 15,
+      color: '#84cc16',
+    };
+    await runExecutor(c, item({ action: 'UPDATE_CLASS', payload: cls, timestamp: '2026-07-06T00:00:00Z' }));
+    expect(c.calls[0]?.[0]).toBe('classes.upsert');
+    const [table, prune] = c.calls[1] as [string, { classId: string; allowedDays: number[] }];
+    expect(table).toBe('enrollments.pruneDays');
+    expect(prune).toEqual({ classId: 'class-1', allowedDays: [1, 5] });
   });
 });
 
