@@ -25,7 +25,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { ClassSchedule, Student, Payment } from '../types';
-import { getClassEnrollments, getEnrolledStudentIds, saveClassEnrollments } from '../utils/enrollment';
+import { useData } from '../data/DataContext';
 
 interface HomeTabProps {
   students: Student[];
@@ -51,7 +51,12 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   onEditClass
 }) => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [enrollmentsState, setEnrollmentsState] = useState<Record<string, string[]>>(() => getClassEnrollments());
+
+  // Enrollments come from the DataProvider (ClassEnrollment[] junction rows,
+  // tasks.md 3.7 / design decision 9). Writes go through the write-through
+  // enrollStudent/unenrollStudent mutations (DAL-REQ-4) instead of a local
+  // localStorage Record — the legacy enrollment.ts module is retired (3.10).
+  const { enrollments, enrollStudent, unenrollStudent } = useData();
 
   // Enrollment Modal state for Próxima Clase
   const [enrollmentModalClass, setEnrollmentModalClass] = useState<{
@@ -113,25 +118,25 @@ export const HomeTab: React.FC<HomeTabProps> = ({
 
   const nextClassInfo = getNextUpcomingClass();
 
-  // Enroll / Unenroll helpers
+  // Enroll / Unenroll helpers (write-through via DataProvider, DAL-REQ-4)
   const handleEnrollStudent = (studentId: string, classId: string, dayOfWeek: number) => {
-    const specificKey = `${classId}_day_${dayOfWeek}`;
-    const currentList = enrollmentsState[specificKey] || [];
-    if (!currentList.includes(studentId)) {
-      const updatedList = [...currentList, studentId];
-      const newEnrollments = { ...enrollmentsState, [specificKey]: updatedList };
-      setEnrollmentsState(newEnrollments);
-      saveClassEnrollments(newEnrollments);
+    const alreadyEnrolled = enrollments.some(
+      (e) => e.classId === classId && e.studentId === studentId && e.dayOfWeek === dayOfWeek
+    );
+    if (!alreadyEnrolled) {
+      void enrollStudent({ classId, studentId, dayOfWeek });
     }
   };
 
   const handleUnenrollStudent = (studentId: string, classId: string, dayOfWeek: number) => {
-    const specificKey = `${classId}_day_${dayOfWeek}`;
-    const currentList = enrollmentsState[specificKey] || [];
-    const updatedList = currentList.filter((id) => id !== studentId);
-    const newEnrollments = { ...enrollmentsState, [specificKey]: updatedList };
-    setEnrollmentsState(newEnrollments);
-    saveClassEnrollments(newEnrollments);
+    void unenrollStudent({ classId, studentId, dayOfWeek });
+  };
+
+  // Student IDs enrolled in a class on a specific day of the week (DB-REQ-2)
+  const getEnrolledStudentIds = (classId: string, dayOfWeek: number): string[] => {
+    return enrollments
+      .filter((e) => e.classId === classId && e.dayOfWeek === dayOfWeek)
+      .map((e) => e.studentId);
   };
 
   // Find most recent student (sorted by registrationDate or position)
@@ -147,9 +152,6 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   };
 
   const recentStudent = getMostRecentStudent();
-
-  // Enrollments data
-  const enrollments = getClassEnrollments();
 
   return (
     <div className="space-y-6 pb-20">
@@ -237,7 +239,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
             {nextClassInfo ? (
               (() => {
                 const { cls, targetDayId } = nextClassInfo;
-                const enrolledCount = getEnrolledStudentIds(enrollmentsState, cls.id, targetDayId).length;
+                const enrolledCount = getEnrolledStudentIds(cls.id, targetDayId).length;
                 const percentage = Math.min(100, Math.round((enrolledCount / cls.maxCapacity) * 100));
 
                 return (
@@ -612,9 +614,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                   {students
                     .filter((s) => s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()))
                     .map((s) => {
-                      const specificKey = `${enrollmentModalClass.cls.id}_day_${enrollmentModalClass.targetDayId}`;
-                      const currentEnrolled = enrollmentsState[specificKey] || [];
-                      const isEnrolled = currentEnrolled.includes(s.id);
+                      const isEnrolled = getEnrolledStudentIds(enrollmentModalClass.cls.id, enrollmentModalClass.targetDayId).includes(s.id);
 
                       return (
                         <div
@@ -656,11 +656,11 @@ export const HomeTab: React.FC<HomeTabProps> = ({
             {/* Enrolled Students List */}
             <div className="flex-1 overflow-y-auto space-y-2">
               <h4 className="text-xs font-black text-slate-400 uppercase italic">
-                Alumnos Inscritos ({getEnrolledStudentIds(enrollmentsState, enrollmentModalClass.cls.id, enrollmentModalClass.targetDayId).length} / {enrollmentModalClass.cls.maxCapacity})
+                Alumnos Inscritos ({getEnrolledStudentIds(enrollmentModalClass.cls.id, enrollmentModalClass.targetDayId).length} / {enrollmentModalClass.cls.maxCapacity})
               </h4>
 
               {(() => {
-                const enrolledIds = getEnrolledStudentIds(enrollmentsState, enrollmentModalClass.cls.id, enrollmentModalClass.targetDayId);
+                const enrolledIds = getEnrolledStudentIds(enrollmentModalClass.cls.id, enrollmentModalClass.targetDayId);
                 const enrolledList = students.filter((s) => enrolledIds.includes(s.id));
 
                 if (enrolledList.length === 0) {
