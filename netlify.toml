@@ -1,0 +1,13 @@
+# Netlify build config for Intense Studio.
+#
+# The repo uses the modern Bun text lockfile (bun.lock); Netlify's auto-detector
+# historically keys on bun.lockb, so the install/build commands are explicit to
+# keep the pipeline deterministic.
+[build]
+  command = "bun install --frozen-lockfile && bun run build"
+  publish = "dist"
+
+# The app is a single-page tab app with no client-side URL routes, so no
+# redirect rules are needed. VITE_* vars (Supabase URL + publishable key) must
+# be set in the Netlify dashboard env settings — .env is gitignored and is NOT
+# deployed; without them supabaseClient fails loudly at module load.
