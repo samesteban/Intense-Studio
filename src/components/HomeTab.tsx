@@ -1,7 +1,7 @@
 /**
  * HomeTab Component - Main Landing Page with Next Class Card, Recent Student Card, and Bottom "Nuevo" Drawer
  */
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Calendar,
   Clock,
@@ -24,13 +24,16 @@ import {
   Search,
   Trash2
 } from 'lucide-react';
-import { ClassSchedule, Student, Payment } from '../types';
+import { AttendanceRecord, ClassSchedule, Student, Payment } from '../types';
+import { calculateStudentFinances } from '../utils/pricing';
+import { deriveStudentStatus } from '../lib/status';
 import { useData } from '../data/DataContext';
 
 interface HomeTabProps {
   students: Student[];
   classes: ClassSchedule[];
   payments: Payment[];
+  attendances: AttendanceRecord[];
   onNavigateTab: (tab: string) => void;
   onOpenNewClass: () => void;
   onOpenNewStudent: () => void;
@@ -43,6 +46,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   students,
   classes,
   payments,
+  attendances,
   onNavigateTab,
   onOpenNewClass,
   onOpenNewStudent,
@@ -64,6 +68,19 @@ export const HomeTab: React.FC<HomeTabProps> = ({
     targetDayId: number;
   } | null>(null);
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
+
+  // Derived status per student (STATUS-REQ-2/4, DAL-REQ-6): recomputed via
+  // useMemo when attendances or payments change, never persisted. Inactive
+  // students produce no finance status, so they are excluded from the
+  // al_dia/con_deuda counters and render the inactive marker instead.
+  const statusByStudent = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof deriveStudentStatus>>();
+    students.forEach((s) => {
+      const finances = calculateStudentFinances(s.id, attendances, payments);
+      map.set(s.id, deriveStudentStatus(s.active, finances));
+    });
+    return map;
+  }, [students, attendances, payments]);
 
   // Day names for Chilean Spanish context
   const dayNames = [
@@ -194,13 +211,13 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="text-slate-400 text-xs font-semibold">Al Día</div>
             <div className="text-xl font-black text-emerald-400 mt-0.5">
-              {students.filter((s) => s.status === 'al_dia').length}
+              {students.filter((s) => statusByStudent.get(s.id)?.status === 'al_dia').length}
             </div>
           </div>
           <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="text-slate-400 text-xs font-semibold">Con Deuda</div>
             <div className="text-xl font-black text-amber-400 mt-0.5">
-              {students.filter((s) => s.status === 'con_deuda').length}
+              {students.filter((s) => statusByStudent.get(s.id)?.status === 'con_deuda').length}
             </div>
           </div>
           <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -369,18 +386,27 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                       </div>
                     </div>
 
-                    {/* Status badge */}
+                    {/* Status badge (derived, STATUS-REQ-2/6) */}
                     <div className="text-right">
-                      {recentStudent.status === 'al_dia' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 rounded-xl text-xs font-black">
-                          <CheckCircle className="w-3.5 h-3.5" /> Al Día
-                        </span>
-                      )}
-                      {recentStudent.status === 'con_deuda' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-950/80 text-amber-400 border border-amber-500/40 rounded-xl text-xs font-black">
-                          <AlertTriangle className="w-3.5 h-3.5" /> Con Deuda
-                        </span>
-                      )}
+                      {(() => {
+                        const info = statusByStudent.get(recentStudent.id);
+                        if (!info || !info.active) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-400 border border-slate-600 rounded-xl text-xs font-black">
+                              Inactivo
+                            </span>
+                          );
+                        }
+                        return info.status === 'al_dia' ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 rounded-xl text-xs font-black">
+                            <CheckCircle className="w-3.5 h-3.5" /> Al Día
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-950/80 text-amber-400 border border-amber-500/40 rounded-xl text-xs font-black">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Con Deuda
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -390,12 +416,18 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                       <span className="text-slate-400 block text-[10px] font-semibold uppercase">Teléfono</span>
                       <span className="text-slate-200 font-bold">{recentStudent.phone || 'No registrado'}</span>
                     </div>
+                    {/* Último pago derivado del historial real (DAL-REQ-6/STATUS-REQ-4, S1) */}
                     <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px] font-semibold uppercase">Último Pago</span>
                       <span className="text-slate-200 font-bold">
-                        {recentStudent.lastPaymentAmount
-                          ? `$${recentStudent.lastPaymentAmount.toLocaleString('es-CL')} (${recentStudent.lastPaymentDate || ''})`
-                          : 'Sin pagos aun'}
+                        {(() => {
+                          const latest = payments
+                            .filter((p) => p.studentId === recentStudent.id)
+                            .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate))[0];
+                          return latest
+                            ? `$${latest.amount.toLocaleString('es-CL')} (${latest.paymentDate || ''})`
+                            : 'Sin pagos aun';
+                        })()}
                       </span>
                     </div>
                   </div>

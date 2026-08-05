@@ -272,6 +272,7 @@ export default function App() {
                 students={students}
                 classes={classes}
                 payments={payments}
+                attendances={attendances}
                 onNavigateTab={handleTabChange}
                 onOpenNewClass={() => {
                   setClassToEdit(null);
@@ -297,6 +298,8 @@ export default function App() {
             {activeTab === 'students' && (
               <StudentsTab
                 students={students}
+                attendances={attendances}
+                payments={payments}
                 onOpenNewStudent={() => {
                   setStudentToEdit(null);
                   setIsStudentModalOpen(true);
