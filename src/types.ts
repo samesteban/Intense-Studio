@@ -78,11 +78,24 @@ export type SyncAction =
   | 'UNENROLL_STUDENT'
   | 'DELETE_ATTENDANCE';
 
+/**
+ * Per-action payload for an offline sync item (S3 / PR3a review — hardened in
+ * PR4). The union covers every persisted entity the queue can carry, plus a
+ * bare `{ id }` for delete-only actions. Executors narrow by `action`.
+ */
+export type SyncPayload =
+  | Student
+  | ClassSchedule
+  | Payment
+  | AttendanceRecord
+  | ClassEnrollment
+  | { id: string };
+
 export interface OfflineSyncItem {
   id: string;
   action: SyncAction;
   entity: string;
-  payload: any;
+  payload: SyncPayload;
   timestamp: string;
 }
 

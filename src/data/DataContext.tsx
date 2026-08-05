@@ -131,7 +131,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         payload,
         id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         timestamp: new Date().toISOString(),
-      };
+      } as OfflineSyncItem;
       try {
         addToOfflineQueue(item);
         setQueue(getOfflineQueue());
